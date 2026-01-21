@@ -4,14 +4,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PORT=8080
 
 # -------------------------
-# Variables de entorno para MySQL
-# -------------------------
-ENV MYSQL_ROOT_PASSWORD=root
-ENV MYSQL_DATABASE=app_db
-ENV MYSQL_USER=app_user
-ENV MYSQL_PASSWORD=app_pass
-
-# -------------------------
 # Instalar paquetes
 # -------------------------
 RUN apt-get update && apt-get install -y \
@@ -34,57 +26,22 @@ RUN sed -i "s/Listen 80/Listen ${PORT}/" /etc/apache2/ports.conf \
 # -------------------------
 # MySQL dirs
 # -------------------------
-RUN mkdir -p /var/run/mysqld /var/lib/mysql /docker-entrypoint-initdb.d \
- && chown -R mysql:mysql /var/run/mysqld /var/lib/mysql /docker-entrypoint-initdb.d
+RUN mkdir -p /var/run/mysqld /docker-entrypoint-initdb.d \
+ && chown -R mysql:mysql /var/run/mysqld /docker-entrypoint-initdb.d
 
 # -------------------------
-# Copiar SQL de inicialización y código PHP
+# Copiar SQL de init
 # -------------------------
 COPY sql/init.sql /docker-entrypoint-initdb.d/init.sql
-COPY src/ /var/www/html/
-RUN chown -R www-data:www-data /var/www/html
 
 # -------------------------
-# Script de inicialización de MySQL usando variables de entorno
-# -------------------------
-RUN printf "#!/bin/bash\n\
-set -e\n\
-if [ ! -d /var/lib/mysql/mysql ]; then\n\
-  echo 'Inicializando MySQL...'\n\
-  mysqld --initialize-insecure --user=mysql\n\
-  mysqld --skip-networking &\n\
-  pid=\$!\n\
-  until mysqladmin ping --silent; do sleep 1; done\n\
-  mysql -u root <<EOF\n\
-CREATE DATABASE IF NOT EXISTS \${MYSQL_DATABASE};\n\
-CREATE USER IF NOT EXISTS '\${MYSQL_USER}'@'%' IDENTIFIED BY '\${MYSQL_PASSWORD}';\n\
-GRANT ALL PRIVILEGES ON \${MYSQL_DATABASE}.* TO '\${MYSQL_USER}'@'%';\n\
-FLUSH PRIVILEGES;\n\
-EOF\n\
-  # Ejecutar init.sql si existe\n\
-  if [ -f /docker-entrypoint-initdb.d/init.sql ]; then\n\
-    mysql -u root \${MYSQL_DATABASE} < /docker-entrypoint-initdb.d/init.sql\n\
-  fi\n\
-  mysqladmin shutdown\n\
-fi\n" > /usr/local/bin/mysql-init.sh \
- && chmod +x /usr/local/bin/mysql-init.sh
-
-# -------------------------
-# Wrapper para Supervisor
-# -------------------------
-RUN printf "#!/bin/bash\n\
-/usr/local/bin/mysql-init.sh\n\
-exec /usr/sbin/mysqld\n" > /usr/local/bin/mysql-start.sh \
- && chmod +x /usr/local/bin/mysql-start.sh
-
-# -------------------------
-# Configuración de Supervisor
+# Supervisor config
 # -------------------------
 RUN mkdir -p /etc/supervisor/conf.d
 
 RUN printf "[supervisord]\nnodaemon=true\n\n\
 [program:mysql]\n\
-command=/usr/local/bin/mysql-start.sh\n\
+command=/usr/sbin/mysqld\n\
 user=mysql\n\
 autorestart=true\n\
 stdout_logfile=/dev/stdout\n\
@@ -95,6 +52,44 @@ autorestart=true\n\
 stdout_logfile=/dev/stdout\n\
 stderr_logfile=/dev/stderr\n" \
 > /etc/supervisor/conf.d/supervisord.conf
+
+# -------------------------
+# Script de init MySQL
+# -------------------------
+RUN printf "#!/bin/bash\n\
+set -e\n\
+if [ ! -d /var/lib/mysql/mysql ]; then\n\
+  echo 'Inicializando MySQL...'\n\
+  mysqld --initialize-insecure --user=mysql\n\
+  mysqld --skip-networking &\n\
+  pid=$!\n\
+  until mysqladmin ping --silent; do sleep 1; done\n\
+  mysql < /docker-entrypoint-initdb.d/init.sql\n\
+  mysqladmin shutdown\n\
+fi\n" > /usr/local/bin/mysql-init.sh \
+ && chmod +x /usr/local/bin/mysql-init.sh
+
+# -------------------------
+# Wrapper de MySQL
+# -------------------------
+RUN printf "#!/bin/bash\n\
+/usr/local/bin/mysql-init.sh\n\
+exec /usr/sbin/mysqld\n" > /usr/local/bin/mysql-start.sh \
+ && chmod +x /usr/local/bin/mysql-start.sh
+
+# -------------------------
+# Actualizar Supervisor para usar wrapper
+# -------------------------
+RUN sed -i "s|/usr/sbin/mysqld|/usr/local/bin/mysql-start.sh|" \
+ /etc/supervisor/conf.d/supervisord.conf
+
+# -------------------------
+# App
+# -------------------------
+WORKDIR /var/www/html
+
+COPY . /var/www/html
+RUN chown -R www-data:www-data /var/www/html
 
 EXPOSE 8080
 
