@@ -1,13 +1,14 @@
 <?php
 // Configuración DB
-$host = '127.0.0.1'; // TCP para evitar Permission denied
-$db   = 'app_db';
-$user = 'app_user';  // coincide con init.sql
-$pass = 'app_pass';
+$host = getenv('DB_HOST');
+$user = getenv('DB_USER');
+$pass = getenv('DB_PASS');
+$db   = getenv('DB_NAME');
+$port = getenv('DB_PORT');
 $charset = 'utf8mb4';
 
 // Conexión PDO
-$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+$dsn = "mysql:host=$host;port=$port;dbname=$db;charset=$charset";
 try {
     $pdo = new PDO($dsn, $user, $pass, [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
